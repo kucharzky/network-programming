@@ -88,7 +88,7 @@ main(int argc, char **argv)
 	socklen_t			clilen;
 	struct sockaddr_in6	cliaddr, servaddr;
 	void				sig_chld(int);
-//#define SIGCHLD_
+#define SIGCHLD_
 #ifdef SIGCHLD_
     struct sigaction new_action, old_action;
 

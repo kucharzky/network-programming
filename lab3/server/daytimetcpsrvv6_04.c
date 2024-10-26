@@ -27,6 +27,7 @@
 int
 main(int argc, char **argv)
 {
+        signal(SIGPIPE, SIG_IGN);
 	int  listenfd, connfd, sndbuf;
 	socklen_t  slen;
 	char  buff[MAXLINE], str[INET6_ADDRSTRLEN+1];
@@ -162,6 +163,8 @@ main(int argc, char **argv)
                 	fprintf(stderr,"write error : %s\n", strerror(errno));
                      gettimeofday(&stop,0);
                      if( (stop.tv_sec - start.tv_sec) > 5 )
+                        break;
+                     if(errno==EPIPE)
                         break;
                 }
                 printf("Wrote  %d segments\n", i);
