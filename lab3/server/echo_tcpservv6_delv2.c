@@ -35,11 +35,10 @@ sig_chld(int signo)
 void
 sig_pipe(int signo)
 {
-	pid_t	pid;
-	int		stat;
-
+	if(errno==32)
+	printf("errno: %s\n", strerror(errno));
 	printf("\nSprzątam po sobie\n");
-	return;
+	
 }
 
 ssize_t						/* Write "n" bytes to a descriptor. */
@@ -95,7 +94,7 @@ again:
 
 	printf("\n\nTutaj nalezy posprzatac po procesie\n\n");
 }
-			
+		
 
 int
 main(int argc, char **argv)
@@ -121,9 +120,7 @@ main(int argc, char **argv)
     }
  
 #endif 
-//	signal(SIGCHLD, sig_chld);
-//	signal(SIGCHLD, SIG_IGN);
-//	signal(SIGPIPE, sig_pipe);
+
 	
    if ( (listenfd = socket(AF_INET6, SOCK_STREAM, 0)) < 0){
           fprintf(stderr,"socket error : %s\n", strerror(errno));
@@ -162,6 +159,7 @@ main(int argc, char **argv)
 		}
 
 		if ( (childpid = fork()) == 0) {	/* child process */
+			signal(SIGPIPE, sig_pipe);
 			close(listenfd);	/* close listening socket */
 			str_echo(connfd);	/* process the request */
 			exit(0);
