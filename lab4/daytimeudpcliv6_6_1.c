@@ -13,7 +13,6 @@
 #include        <string.h>
 #include        <unistd.h>
 
-
 #define MAXLINE 1024
 #define SA      struct sockaddr
 
@@ -127,64 +126,89 @@ dt_cli(int sockfd, const SA *pservaddr, socklen_t servlen)
 	return 0;
 }
 
-	void
-dt_cli_connect(int sockfd, const SA *pservaddr, socklen_t servlen)
+void dt_cli_connect(int sockfd, const SA *pservaddr, socklen_t servlen)
 {
-	int		n;
-	char	sendline[MAXLINE], recvline[MAXLINE + 1];
-	char		str[INET6_ADDRSTRLEN+1];
+	int n, i;
+	char sendline[MAXLINE], recvline[MAXLINE + 1];
+	char str[INET6_ADDRSTRLEN+1];
+	socklen_t len;
+	struct sockaddr *preply_addr;
+	struct timeval delay;
 
-	bzero(str, sizeof(str));
-	if( connect(sockfd, (SA *) pservaddr, servlen) < 0 ){
-		perror("connect error");
+	if ((preply_addr = malloc(servlen)) == NULL) {
+		perror("malloc error");
 		exit(1);
 	}
 
-//	if( write(sockfd, sendline, strlen(sendline)+1) < 0 ){
-	if( write(sockfd, sendline, 0) < 0 ){
-		perror("write error");
-		exit(1);
-	}
+	bzero(sendline, sizeof(sendline));
 
-	if( (n = read(sockfd, recvline, MAXLINE)) < 0 ){
-		perror("read error");
-		exit(1);
-	}
+#ifndef M_ALARM
 
-	recvline[n] = 0;	/* null terminate */
-	if (fputs(recvline, stdout) == EOF){
-		fprintf(stderr,"fputs error : %s\n", strerror(errno));
-		exit(1);
+	delay.tv_sec = 3;
+	delay.tv_usec = 1; 
+	len = sizeof(delay);
+	if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &delay, len) == -1) {
+		fprintf(stderr,"SO_RCVTIMEO setsockopt error : %s\n", strerror(errno));
+		return;
 	}
+#else
+	m_signal(SIGALRM, sig_alarm);
+#endif
+
+	len = servlen;
+
+	for(i=0; i < 3 ; i++ ){
+
+	    if (connect(sockfd, (SA *)pservaddr, servlen) < 0) {
+	        perror("connect error");
+			continue;
+	    }
+
+	    if (write(sockfd, sendline, strlen(sendline)+1) < 0) {
+	        perror("write error");
+	        exit(1);
+	    }
+
+	    if ((n = read(sockfd, recvline, MAXLINE)) < 0) {
+	        perror("read error");
+			continue;
+	    }
+
+	    recvline[n] = '\0'; /* null terminate */
+	    if (fputs(recvline, stdout) == EOF) {
+	        fprintf(stderr,"fputs error : %s\n", strerror(errno));
+	        exit(1);
+	    }
+
+		break;
+    }
+
 }
 
-	int
-main(int argc, char **argv)
+int main(int argc, char **argv)
 {
-	int					sockfd, n, delay;
-	struct sockaddr_in6	servaddr;
-	char				recvline[MAXLINE + 1];
+	int sockfd;
+	struct sockaddr_in6 servaddr;
 
 	if (argc != 2){
-		fprintf(stderr, "usage: a.out <IPaddress> \n");
-		return 1;
+	    fprintf(stderr,"usage: a.out <IPaddress>\n");
+	    return 1;
 	}
-	if ( (sockfd = socket(AF_INET6, SOCK_DGRAM, 0)) < 0){
-		fprintf(stderr,"socket error : %s\n", strerror(errno));
-		return 1;
+	if ((sockfd = socket(AF_INET6, SOCK_DGRAM, 0)) < 0){
+	    fprintf(stderr,"socket error : %s\n", strerror(errno));
+	    return 1;
 	}
 
-
-	bzero(&servaddr, sizeof(servaddr));
+	bzero(&servaddr,sizeof(servaddr));
 	servaddr.sin6_family = AF_INET6;
-	servaddr.sin6_port   = htons(13);	/* daytime server */
+	servaddr.sin6_port   = htons(13); /* daytime server */
 	if (inet_pton(AF_INET6, argv[1], &servaddr.sin6_addr) <= 0){
-		fprintf(stderr,"inet_pton error for %s : %s \n", argv[1], strerror(errno));
-		return 1;
+	    fprintf(stderr,"inet_pton error for %s : %s \n", argv[1], strerror(errno));
+	    return 1;
 	}
 
-//	dt_cli( sockfd, (SA *) &servaddr, sizeof(servaddr));
-	dt_cli_connect( sockfd, (SA *) &servaddr, sizeof(servaddr));
+//	dt_cli( sockfd, (SA *) &servaddr, sizeof(servaddr));//	dt_cli( sockfd, (SA *) &servaddr, sizeof(servaddr));
+	dt_cli_connect(sockfd,(SA *)&servaddr,sizeof(servaddr));
 
 	printf("W ciagu dziesieciu sekund mozna podgladac stan otwartego gniazda: netstat -u6ap \n\n");
 	fflush(stdout);
