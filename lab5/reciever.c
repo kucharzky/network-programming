@@ -7,123 +7,81 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <net/if.h>
 
-#define SA struct sockaddr
 #define MAXLINE 1024
+#define SA struct sockaddr
 
-int snd_udp_socket(const char *serv, int port, SA **saptr, socklen_t *lenp) {
-    int sockfd;
-    struct sockaddr_in *pservaddr;
+int mcast_join(int sockfd, const SA *grp, socklen_t grplen, const char *ifname) {
+    struct ipv6_mreq mreq6;
+    memcpy(&mreq6.ipv6mr_multiaddr, &((struct sockaddr_in6 *)grp)->sin6_addr, sizeof(struct in6_addr));
+    mreq6.ipv6mr_interface = if_nametoindex(ifname);
 
-    *saptr = malloc(sizeof(struct sockaddr_in));
-    if (*saptr == NULL) {
-        perror("malloc error");
+    if (setsockopt(sockfd, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq6, sizeof(mreq6)) < 0) {
+        perror("setsockopt IPV6_JOIN_GROUP");
         return -1;
     }
-
-    pservaddr = (struct sockaddr_in *)*saptr;
-    memset(pservaddr, 0, sizeof(struct sockaddr_in));
-
-    pservaddr->sin_family = AF_INET;
-    pservaddr->sin_port = htons(port);
-
-    if (inet_pton(AF_INET, serv, &pservaddr->sin_addr) <= 0) {
-        fprintf(stderr, "inet_pton error for %s: %s\n", serv, strerror(errno));
-        free(*saptr);
-        return -1;
-    }
-
-    *lenp = sizeof(struct sockaddr_in);
-
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        perror("socket error");
-        free(*saptr);
-        return -1;
-    }
-
-    return sockfd;
-}
-
-int mcast_join(int sockfd, const SA *grp, socklen_t grplen, const char *ifname, u_int ifindex) {
-    struct ip_mreq mreq;
-
-    memcpy(&mreq.imr_multiaddr,
-           &((struct sockaddr_in *)grp)->sin_addr,
-           sizeof(struct in_addr));
-
-    if (ifname != NULL) {
-        struct in_addr local_interface;
-        local_interface.s_addr = inet_addr(ifname);
-        mreq.imr_interface = local_interface;
-    } else {
-        mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-    }
-
-    return setsockopt(sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq));
+    return 0;
 }
 
 void recv_all(int recvfd, socklen_t salen) {
     char line[MAXLINE + 1];
-    char addr_str[INET6_ADDRSTRLEN + 1];
-    struct sockaddr_storage safrom;
     socklen_t len;
-    int n;
+    struct sockaddr *safrom;
+    safrom = malloc(salen);
 
     for (;;) {
         len = salen;
-        if ((n = recvfrom(recvfd, line, MAXLINE, 0, (struct sockaddr *)&safrom, &len)) < 0)
-            perror("recvfrom() error");
+        int n = recvfrom(recvfd, line, MAXLINE, 0, safrom, &len);
+        if (n < 0)
+            perror("recvfrom error");
 
         line[n] = 0;
-
-        if (safrom.ss_family == AF_INET6) {
-            struct sockaddr_in6 *cliaddr = (struct sockaddr_in6 *)&safrom;
-            inet_ntop(AF_INET6, &cliaddr->sin6_addr, addr_str, sizeof(addr_str));
-        } else {
-            struct sockaddr_in *cliaddr = (struct sockaddr_in *)&safrom;
-            inet_ntop(AF_INET, &cliaddr->sin_addr, addr_str, sizeof(addr_str));
-        }
-
-        printf("Datagram from %s: %s (%d bytes)\n", addr_str, line, n);
+        printf("Received: %s\n", line);
         fflush(stdout);
     }
 }
 
 int main(int argc, char **argv) {
-    if (argc != 4) {
-        fprintf(stderr, "usage: %s <IP-multicast-address> <port#> <if name>\n", argv[0]);
-        return 1;
-    }
-
     int recvfd;
     const int on = 1;
     socklen_t salen;
-    struct sockaddr *sasend, *sarecv;
+    struct sockaddr_in6 sarecv;
 
-    recvfd = snd_udp_socket(argv[1], atoi(argv[2]), &sasend, &salen);
-
-    sarecv = malloc(salen);
-    memcpy(sarecv, sasend, salen);
-
-    if (setsockopt(recvfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
-        perror("setsockopt SO_REUSEADDR error");
+    if (argc != 4) {
+        fprintf(stderr, "usage: %s <IPv6-multicast-address> <port#> <if name>\n", argv[0]);
         return 1;
     }
 
-    if (bind(recvfd, sarecv, salen) < 0) {
+    recvfd = socket(AF_INET6, SOCK_DGRAM, 0);
+    if (recvfd < 0) {
+        perror("socket error");
+        return 1;
+    }
+
+    if (setsockopt(recvfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
+        perror("setsockopt SO_REUSEADDR");
+        return 1;
+    }
+
+    bzero(&sarecv, sizeof(sarecv));
+    sarecv.sin6_family = AF_INET6;
+    sarecv.sin6_addr = in6addr_any;
+    sarecv.sin6_port = htons(atoi(argv[2]));
+    salen = sizeof(sarecv);
+
+    if (bind(recvfd, (SA *)&sarecv, salen) < 0) {
         perror("bind error");
         return 1;
     }
 
-    if (mcast_join(recvfd, sasend, salen, argv[3], 0) < 0) {
-        perror("mcast_join() error");
+    struct sockaddr_in6 group;
+    inet_pton(AF_INET6, argv[1], &group.sin6_addr);
+    if (mcast_join(recvfd, (SA *)&group, salen, argv[3]) < 0)
         return 1;
-    }
 
     recv_all(recvfd, salen);
 
-    free(sasend);
-    free(sarecv);
     close(recvfd);
     return 0;
 }
