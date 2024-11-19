@@ -10,6 +10,7 @@
 #include <sys/utsname.h>
 
 #define MAXLINE 1024
+#define SA struct sockaddr
 int snd_udp_socket(const char *serv, int port, SA **saptr, socklen_t *lenp);
 int mcast_join(int sockfd, const SA *grp, socklen_t grplen, const char *ifname, u_int ifindex);
 
